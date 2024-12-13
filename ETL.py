@@ -1,5 +1,5 @@
 # from freshsales.api import API
-from utils import get_data, save_local, read_data, convert_datatypes,build_db_conn, read_exec_sql
+from utils import get_data, save_local, read_data, convert_datatypes,build_db_conn, read_exec_sql, post_data
 import pandas as pd
 from prefect import task, flow
 from sqlalchemy import create_engine, text
@@ -59,7 +59,7 @@ def data_preprocess() -> pd.DataFrame:
 
     # Deals
     deals_df = deals_df[['id', 'name', 'amount', 'custom_field','sales_account_id']]
-    deals_df = deals_df.rename(columns={'id': 'deal_id', 'name': 'deal_name','sales_account_id':'account_id'})
+    deals_df = deals_df.rename(columns={'id': 'deal_id', 'name': 'deal_name','sales_account_id':'account_id','amount':'deal_size'})
     deals_df[['probability_of_closure', 'deal_stage']] = pd.json_normalize(deals_df['custom_field'])
 
     return contacts_df, accounts_df, deals_df
@@ -80,10 +80,13 @@ def transform_data(contacts_df, accounts_df, deals_df) -> pd.DataFrame:
     """
     contacts_df, accounts_df, deals_df = data_preprocess()
     dfs = [contacts_df, accounts_df, deals_df]
+
     [df.drop('custom_field', axis=1, inplace=True) for df in dfs]
     [df.drop_duplicates(inplace=True) for df in dfs]
+
     # Update amount for specific deal id 
-    deals_df.loc[deals_df['amount'] == 24456, 'deal_id'] = 402002591851
+    deals_df.loc[deals_df['deal_id'] == 402002591851, 'deal_size'] = 24456  
+
     merge_df1 = pd.merge(accounts_df, contacts_df, how='left', on='account_id')
     merge_df2 = pd.merge(merge_df1, deals_df, how='left', on='account_id')
     # Aggregates of contacts and deals per account
@@ -95,9 +98,14 @@ def transform_data(contacts_df, accounts_df, deals_df) -> pd.DataFrame:
     monthly_agg = merge_df2.groupby(['account_id']).resample('ME', on='acc_created_at').agg({'contact_id':'count', 'deal_id': 'count'}).reset_index()
     # List of contacts per account
     accounts_contacts = merge_df1.groupby('account_id')['contact_id'].apply(list).reset_index()
+    
     tables = (contacts_df, accounts_df, deals_df, accounts_contacts, weekly_agg, daily_agg, monthly_agg)
-    return tables
 
+    # Push updated deals data to Freshsales
+    data = '{"unique_identifier":{"id": "402002591851"}, "deal":{"amount":"24456.0"}}'
+    post_data("https://sbti-785490157659151199.myfreshworks.com/crm/sales/api/deals/upsert", data)
+
+    return tables
 
 @task 
 def load_data(contacts_df, accounts_df, deals_df, accounts_contacts, weekly_agg, daily_agg, monthly_agg):

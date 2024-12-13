@@ -36,6 +36,21 @@ def get_data(endpoint, include_column) -> pd.DataFrame:
         df = None
     return df
 
+def post_data(endpoint, data):
+    """_summary_
+    Args:
+        endpoint: freshsales API endpoint
+    """
+    # json_data = df.to_json()
+    print(data)
+    response = requests.post(endpoint, data = data, headers=headers)
+    print(response.status_code)
+
+
+
+
+
+
 
 def save_local(df, name) -> None:
     """_summary_
